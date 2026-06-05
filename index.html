@@ -1,0 +1,1364 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Neurix — Interactive Neural Exploration</title>
+    <meta name="description" content="Interactive 3D neuron laboratory — explore neuron types, signals, and structure">
+    <script>
+        window.onerror = function(message, source, lineno, colno, error) {
+            var ldStep = document.getElementById('ld-step');
+            if (ldStep) {
+                ldStep.textContent = "Error: " + message + " (Line " + lineno + ")";
+                ldStep.style.color = "#ff4444";
+                ldStep.style.fontSize = "0.75rem";
+                ldStep.style.letterSpacing = "normal";
+                ldStep.style.textTransform = "none";
+            }
+        };
+        window.addEventListener('unhandledrejection', function(event) {
+            var ldStep = document.getElementById('ld-step');
+            if (ldStep) {
+                ldStep.textContent = "Promise Error: " + event.reason;
+                ldStep.style.color = "#ff4444";
+                ldStep.style.fontSize = "0.75rem";
+                ldStep.style.letterSpacing = "normal";
+                ldStep.style.textTransform = "none";
+            }
+        });
+    </script>
+    <link rel="preconnect" href="https://cdn.jsdelivr.net">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="icon" href="assets/favicon.png" type="image/png">
+    <link rel="preload" href="https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js" as="script" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+        html, body { height: 100%; }
+        body { margin: 0; overflow: hidden; background: #030810; font-family: 'Inter', -apple-system, sans-serif; user-select: none; color: #e0edff; cursor: default; }
+        canvas { display: block; position: fixed; inset: 0; width: 100vw; height: 100vh; }
+        ::selection { background: rgba(0,150,255,0.3); }
+
+        /* Loading */
+        #loading-screen { position: fixed; inset: 0; z-index: 10000; display: flex; flex-direction: column; align-items: center; justify-content: center; background: #030810; transition: opacity 0.9s ease; }
+        #loading-screen.hidden { opacity: 0; pointer-events: none; }
+        .ld-logo { font-family: 'Space Grotesk', sans-serif; font-size: 2rem; font-weight: 700; letter-spacing: 0.25em; color: #dce8f8; margin-bottom: 6px; }
+        .ld-logo-img { width: 140px; height: auto; margin-bottom: 16px; }
+        .ld-sub { display: none; }
+        .ld-spinner { width: 38px; height: 38px; border: 2px solid rgba(0,140,255,0.12); border-top-color: rgba(0,180,255,0.85); border-radius: 50%; animation: spin 0.85s linear infinite; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .ld-bar { width: 210px; height: 2px; background: rgba(0,80,180,0.12); border-radius: 2px; margin-top: 18px; overflow: hidden; }
+        .ld-bar-fill { height: 100%; width: 0%; background: linear-gradient(90deg, #006eff, #00e5a0); border-radius: 2px; animation: ldFill 2.2s cubic-bezier(.4,0,.2,1) forwards; }
+        @keyframes ldFill { 0%{width:0%} 100%{width:100%} }
+        .ld-step { margin-top: 14px; font-size: 0.52rem; letter-spacing: 0.18em; color: rgba(100,155,225,0.35); text-transform: uppercase; height: 14px; transition: opacity 0.3s; }
+
+        /* WebGL error */
+        #webgl-error { position: fixed; inset: 0; z-index: 10001; display: none; align-items: center; justify-content: center; background: #030810; color: rgba(100,155,230,0.7); font-size: 0.9rem; text-align: center; padding: 20px; line-height: 2; }
+        #webgl-error.visible { display: flex; }
+
+        /* Glass panel base */
+        .pg { background: rgba(6,15,35,0.95); border: 1px solid rgba(60,140,240,0.5); border-radius: 10px; padding: 14px 16px; backdrop-filter: blur(24px) saturate(200%); -webkit-backdrop-filter: blur(24px) saturate(200%); box-shadow: 0 0 30px rgba(0,80,200,0.12), inset 0 0 40px rgba(0,80,220,0.04); }
+
+        #app-title { position: fixed; top: 14px; left: 50%; transform: translateX(-50%); z-index: 20; font-family: 'Space Grotesk', sans-serif; font-size: 0.72rem; font-weight: 700; letter-spacing: 0.2em; color: rgba(220,240,255,1); text-transform: uppercase; pointer-events: none; text-shadow: 0 0 30px rgba(0,120,255,0.25), 0 0 60px rgba(0,80,255,0.1); }
+
+        /* ─── INFO BUTTON ─── */
+        #info-btn { position: fixed; top: 14px; right: 14px; z-index: 25; font-size: 0.58rem; padding: 8px 16px; cursor: pointer; color: #fff; background: rgba(10,22,50,0.95); border: 1px solid rgba(80,160,255,0.55); border-radius: 8px; backdrop-filter: blur(14px); text-transform: uppercase; letter-spacing: 0.08em; transition: all 0.15s; display: flex; align-items: center; gap: 7px; font-family: 'Inter', sans-serif; font-weight: 600; box-shadow: 0 0 20px rgba(0,100,255,0.15), inset 0 0 20px rgba(0,100,255,0.04); }
+        #info-btn:hover { color: #fff; border-color: #60b0ff; background: rgba(15,30,70,0.98); box-shadow: 0 0 35px rgba(0,140,255,0.3); }
+        #info-btn span { font-size: 0.8rem; }
+
+        /* Info panel */
+        #info-panel { position: fixed; top: 54px; right: 14px; width: 280px; z-index: 10; pointer-events: auto; opacity: 0; transform: translateY(-8px); transition: opacity 0.25s ease, transform 0.25s ease; pointer-events: none; }
+        #info-panel.vis { opacity: 1; transform: translateY(0); pointer-events: auto; }
+        .iph { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; margin-bottom: 10px; padding-bottom: 10px; border-bottom: 1px solid rgba(60,140,240,0.3); }
+        .iptitle { font-family: 'Space Grotesk', sans-serif; font-size: 0.85rem; font-weight: 700; color: #f0f6ff; line-height: 1.3; text-shadow: 0 0 15px rgba(0,120,255,0.15); }
+        .ipsub { font-size: 0.5rem; color: #60c0ff; letter-spacing: 0.08em; text-transform: uppercase; margin-top: 3px; }
+        .ipgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 14px; font-size: 0.5rem; margin-bottom: 10px; }
+        .ipl { color: rgba(150,200,255,0.7); text-transform: uppercase; letter-spacing: 0.06em; font-size: 0.44rem; }
+        .ipv { color: #f0f8ff; font-weight: 600; line-height: 1.4; }
+        .ipdesc { font-size: 0.5rem; color: rgba(190,220,255,0.85); line-height: 1.6; padding-top: 8px; border-top: 1px solid rgba(60,140,240,0.25); }
+        .iphint { font-size: 0.45rem; color: rgba(140,190,255,0.55); margin-top: 8px; }
+
+        /* Camera controls */
+        #cam-bar { position: fixed; top: 14px; left: 14px; display: flex; gap: 3px; z-index: 11; pointer-events: auto; }
+        .cbtn { font-size: 0.42rem; padding: 6px 12px; cursor: pointer; color: #fff; background: rgba(10,22,50,0.92); border: 1px solid rgba(60,140,240,0.5); border-radius: 6px; transition: all 0.15s; text-transform: uppercase; letter-spacing: 0.06em; text-align: center; white-space: nowrap; font-family: 'Inter', sans-serif; font-weight: 600; box-shadow: 0 0 15px rgba(0,80,200,0.1); }
+        .cbtn:hover { color: #fff; border-color: #60b0ff; background: rgba(15,30,70,0.98); box-shadow: 0 0 30px rgba(0,140,255,0.25); }
+        .cbtn.active { color: #00ffaa; border-color: #00ffaa; background: rgba(0,80,120,0.5); box-shadow: 0 0 30px rgba(0,255,170,0.2); }
+
+        /* ─── NEURON DRAWER ─── */
+        #neuron-drawer-btn { position: fixed; top: 50%; left: 0; transform: translateY(-50%); z-index: 15; width: 32px; height: 80px; display: flex; align-items: center; justify-content: center; font-size: 0.75rem; cursor: pointer; color: #fff; background: rgba(10,22,50,0.92); border: 1px solid rgba(60,140,240,0.5); border-left: none; border-radius: 0 10px 10px 0; transition: all 0.15s; box-shadow: 4px 0 20px rgba(0,0,0,0.4); }
+        #neuron-drawer-btn:hover { color: #fff; border-color: #60b0ff; background: rgba(15,30,70,0.98); }
+        #neuron-drawer { position: fixed; top: 0; left: 0; bottom: 0; z-index: 12; width: 200px; transform: translateX(-100%); transition: transform 0.3s cubic-bezier(.4,0,.2,1); pointer-events: none; padding: 50px 10px 20px; }
+        #neuron-drawer.open { transform: translateX(0); pointer-events: auto; }
+        #neuron-drawer .pg { height: 100%; display: flex; flex-direction: column; overflow: hidden; border-color: rgba(60,140,240,0.5); box-shadow: 5px 0 40px rgba(0,0,0,0.6); }
+        .shdr { font-size: 0.55rem; font-weight: 700; letter-spacing: 0.12em; color: rgba(180,220,255,0.85); text-transform: uppercase; margin-bottom: 8px; flex-shrink: 0; }
+        .slist { display: flex; flex-direction: column; gap: 2px; overflow-y: auto; flex: 1; scrollbar-width: thin; scrollbar-color: rgba(0,140,255,0.4) transparent; padding-right: 3px; }
+        .slist::-webkit-scrollbar { width: 4px; }
+        .slist::-webkit-scrollbar-thumb { background: rgba(0,140,255,0.5); border-radius: 2px; }
+        .nopt { font-size: 0.5rem; letter-spacing: 0.03em; padding: 7px 10px; cursor: pointer; color: rgba(180,220,255,0.75); transition: all 0.15s ease; border-radius: 6px; background: rgba(12,28,65,0.4); border: 1px solid transparent; display: flex; align-items: center; gap: 7px; flex-shrink: 0; }
+        .nopt::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: currentColor; opacity: 0.6; flex-shrink: 0; transition: all 0.2s; }
+        .nopt:hover { color: #fff; background: rgba(0,70,150,0.45); border-color: rgba(0,160,255,0.35); }
+        .nopt.active { color: #00ffaa; background: rgba(0,90,130,0.5); border-color: #00ffaa55; }
+        .nopt.active::before { background: #00ffaa; opacity: 1; box-shadow: 0 0 12px #00ffaa; }
+        .ntype-color { width: 5px; height: 18px; border-radius: 2px; flex-shrink: 0; }
+
+        /* Tooltip */
+        #tooltip { position: fixed; z-index: 200; pointer-events: none; background: rgba(6,15,35,0.98); border: 1px solid rgba(60,160,255,0.45); border-radius: 10px; padding: 12px 16px; backdrop-filter: blur(20px); opacity: 0; transition: opacity 0.18s ease; max-width: 250px; min-width: 180px; box-shadow: 0 0 35px rgba(0,80,200,0.2); }
+        #tooltip.vis { opacity: 1; }
+        .ttn { font-size: 0.65rem; font-weight: 700; color: #f0f6ff; margin-bottom: 3px; }
+        .ttt { font-size: 0.5rem; color: #60c0ff; margin-bottom: 7px; }
+        .ttr { display: flex; justify-content: space-between; gap: 12px; font-size: 0.48rem; margin-bottom: 3px; }
+        .ttl { color: rgba(140,190,255,0.55); }
+        .ttv { color: rgba(210,235,255,0.95); font-weight: 600; }
+        .tth { font-size: 0.44rem; color: rgba(130,180,255,0.5); margin-top: 6px; border-top: 1px solid rgba(50,100,200,0.3); padding-top: 6px; }
+
+        /* Educational panel */
+        #edu-panel { position: fixed; bottom: 74px; left: 50%; transform: translateX(-50%); width: 500px; max-width: 92vw; z-index: 10; pointer-events: auto; opacity: 0; transition: opacity 0.38s ease; }
+        #edu-panel.vis { opacity: 1; }
+        .eph { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 10px; }
+        .epn { font-family: 'Space Grotesk', sans-serif; font-size: 0.88rem; font-weight: 700; color: #f0f6ff; letter-spacing: 0.04em; }
+        .epc { font-size: 0.47rem; color: #60c0ff; letter-spacing: 0.09em; margin-top: 2px; text-transform: uppercase; }
+        .epx { cursor: pointer; color: rgba(160,210,255,0.5); font-size: 0.68rem; padding: 2px 7px; border-radius: 4px; transition: all 0.15s; line-height: 1; }
+        .epx:hover { color: #fff; background: rgba(30,70,150,0.4); }
+        .epg { display: grid; grid-template-columns: 1fr 1fr; gap: 7px 18px; font-size: 0.49rem; margin-bottom: 10px; }
+        .epf { display: flex; flex-direction: column; gap: 2px; }
+        .epfl { color: rgba(140,190,255,0.6); text-transform: uppercase; letter-spacing: 0.07em; font-size: 0.43rem; }
+        .epfv { color: rgba(220,240,255,0.95); font-weight: 600; line-height: 1.4; }
+        .epd { font-size: 0.49rem; color: rgba(190,220,255,0.8); line-height: 1.62; padding-top: 8px; border-top: 1px solid rgba(60,140,240,0.25); margin-bottom: 7px; }
+        .epfl2 { font-size: 0.42rem; color: #60c0ff; text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 3px; }
+        .epfacts { font-size: 0.47rem; color: rgba(180,215,255,0.7); line-height: 1.55; }
+        .epdis { font-size: 0.44rem; color: rgba(255,130,110,0.6); margin-top: 5px; }
+
+        /* Bottom toolbars */
+        #bottom-bar { position: fixed; bottom: 54px; left: 50%; transform: translateX(-50%); z-index: 55; display: flex; flex-direction: column; align-items: center; gap: 4px; pointer-events: none; max-width: 96vw; }
+        #bottom-bar > * { pointer-events: auto; }
+        #obs-toolbar { display: flex; gap: 3px; flex-wrap: wrap; justify-content: center; max-width: 100%; }
+        .obs-btn { font-size: 0.44rem; letter-spacing: 0.06em; padding: 6px 10px; cursor: pointer; color: #fff; background: rgba(10,22,50,0.9); border: 1px solid rgba(60,140,240,0.4); border-radius: 6px; transition: all 0.17s ease; backdrop-filter: blur(12px); font-family: 'Inter', sans-serif; text-transform: uppercase; font-weight: 600; white-space: nowrap; box-shadow: 0 0 12px rgba(0,80,200,0.08); }
+        .obs-btn:hover { color: #fff; border-color: #60b0ff; background: rgba(15,30,70,0.98); box-shadow: 0 0 25px rgba(0,140,255,0.2); }
+        .obs-btn.active { color: #00ffaa; border-color: #00ffaa; background: rgba(0,80,120,0.5); box-shadow: 0 0 30px rgba(0,255,170,0.15); }
+
+        #viz-modes { display: flex; flex-wrap: wrap; gap: 3px; justify-content: center; }
+        .sig-btn { font-size: 0.42rem; letter-spacing: 0.05em; padding: 5px 10px; cursor: pointer; color: rgba(180,220,255,0.7); background: rgba(10,22,50,0.85); border: 1px solid rgba(60,130,240,0.35); border-radius: 5px; transition: all 0.17s ease; font-family: 'Inter', sans-serif; text-transform: uppercase; font-weight: 600; box-shadow: 0 0 8px rgba(0,60,180,0.06); }
+        .sig-btn:hover { color: #fff; border-color: rgba(60,160,255,0.5); background: rgba(15,30,70,0.95); }
+        .sig-btn.active { color: #fff; border-color: rgba(80,170,255,0.6); background: rgba(25,55,140,0.55); box-shadow: 0 0 30px rgba(0,120,255,0.15); }
+
+        /* Tools bar */
+        #tools-bar { position: fixed; top: 50%; right: 14px; transform: translateY(-50%); z-index: 11; pointer-events: auto; display: flex; flex-direction: column; gap: 4px; }
+        .tool-btn { width: auto; min-width: 36px; height: 36px; display: flex; align-items: center; justify-content: center; font-size: 0.55rem; padding: 0 10px; cursor: pointer; color: #fff; background: rgba(10,22,50,0.92); border: 1px solid rgba(60,140,240,0.5); border-radius: 8px; transition: all 0.17s ease; backdrop-filter: blur(12px); box-shadow: 0 0 15px rgba(0,80,200,0.1); gap: 3px; }
+        .tool-btn:hover { color: #fff; border-color: #60b0ff; background: rgba(15,30,70,0.98); box-shadow: 0 0 30px rgba(0,140,255,0.25); }
+        .tool-btn.active { color: #00ffaa; border-color: #00ffaa; background: rgba(0,80,120,0.5); box-shadow: 0 0 30px rgba(0,255,170,0.15); }
+
+        /* Speed control */
+        #speed-control { position: fixed; bottom: 54px; left: 14px; z-index: 55; pointer-events: auto; display: flex; align-items: center; gap: 8px; background: rgba(10,22,50,0.8); border: 1px solid rgba(60,140,240,0.3); border-radius: 8px; padding: 6px 12px; backdrop-filter: blur(12px); box-shadow: 0 0 15px rgba(0,80,200,0.06); }
+        #speed-control label { font-size: 0.42rem; letter-spacing: 0.08em; color: rgba(160,210,255,0.7); text-transform: uppercase; font-weight: 600; }
+        #speed-slider { width: 65px; height: 4px; -webkit-appearance: none; appearance: none; background: rgba(0,100,220,0.3); border-radius: 2px; outline: none; cursor: pointer; }
+        #speed-slider::-webkit-slider-thumb { -webkit-appearance: none; width: 15px; height: 15px; border-radius: 50%; background: #60c0ff; cursor: pointer; border: none; transition: transform 0.15s; box-shadow: 0 0 12px rgba(0,160,255,0.4); }
+        #speed-slider::-webkit-slider-thumb:hover { transform: scale(1.4); }
+        #speed-slider::-moz-range-thumb { width: 15px; height: 15px; border-radius: 50%; background: #60c0ff; cursor: pointer; border: none; }
+        #speed-val { font-size: 0.46rem; color: #60c0ff; min-width: 26px; text-align: center; font-weight: 700; }
+
+        /* ─── FOOTER ─── */
+        #footer { position: fixed; bottom: 0; left: 0; right: 0; z-index: 50; text-align: center; padding: 6px 16px; background: rgba(3,8,16,0.92); border-top: 1px solid rgba(60,140,240,0.15); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); pointer-events: none; }
+        #footer-inner { display: inline-flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: center; font-size: 0.48rem; letter-spacing: 0.04em; color: rgba(140,190,255,0.5); pointer-events: auto; }
+        #footer-copy { color: rgba(180,220,255,0.65); }
+        #footer-copy strong { color: rgba(200,235,255,0.85); font-weight: 600; }
+        #footer-brand { color: rgba(180,220,255,0.55); }
+        #footer-brand strong { color: rgba(120,190,255,0.7); font-weight: 700; }
+        #footer-license { color: rgba(180,220,255,0.4); font-style: italic; }
+        #footer-div { color: rgba(100,160,230,0.25); font-size: 0.38rem; }
+
+        @media (max-width: 600px) {
+            #footer { padding: 4px 10px; }
+            #footer-inner { font-size: 0.38rem; gap: 5px; }
+            #footer-div { display: none; }
+        }
+
+        @media (max-width: 400px) {
+            #footer-inner { font-size: 0.34rem; gap: 3px; }
+            #footer { padding: 3px 8px; }
+        }
+
+        @media (max-height: 500px) and (orientation: landscape) {
+            #footer { padding: 2px 10px; }
+            #footer-inner { font-size: 0.35rem; }
+        }
+
+        /* ─── RESPONSIVE ─── */
+        /* Tablet: ≤900px */
+        @media (max-width: 900px) {
+            #app-title { font-size: 0.6rem; top: 10px; }
+            #info-btn { top: 10px; right: 10px; font-size: 0.48rem; padding: 4px 8px; }
+            #info-panel { width: 260px; top: 48px; right: 10px; }
+            #cam-bar { top: 10px; left: 10px; gap: 2px; }
+            .cbtn { font-size: 0.36rem; padding: 4px 7px; }
+            #neuron-drawer { width: 180px; }
+            .nopt { font-size: 0.43rem; padding: 4px 7px; }
+            #obs-toolbar { gap: 2px; }
+            .obs-btn { font-size: 0.36rem; padding: 3px 6px; }
+            #viz-modes { gap: 2px; }
+            .sig-btn { font-size: 0.34rem; padding: 3px 6px; }
+            #tools-bar { right: 10px; }
+            .tool-btn { width: 28px; height: 28px; font-size: 0.46rem; }
+            #speed-control { left: 10px; }
+            #speed-slider { width: 50px; }
+            #speed-control label { font-size: 0.36rem; }
+            #speed-val { font-size: 0.38rem; min-width: 20px; }
+        }
+
+        /* Phone: ≤600px */
+        @media (max-width: 600px) {
+            #app-title { font-size: 0.48rem; top: 8px; }
+            #app-title::after { content: '· Zoom: pinch'; position: absolute; left: 50%; transform: translateX(-50%); top: 20px; font-size: 0.3rem; letter-spacing: 0.05em; color: rgba(100,160,230,0.3); text-transform: none; font-family: 'Inter', sans-serif; font-weight: 400; pointer-events: none; white-space: nowrap; }
+            #info-btn { top: 8px; right: 8px; font-size: 0.4rem; padding: 3px 6px; border-radius: 6px; }
+            #info-btn span { font-size: 0.55rem; }
+            #info-panel { width: calc(100vw - 16px); max-width: 320px; top: 42px; right: 8px; padding: 10px 12px; }
+            #info-panel .iptitle { font-size: 0.68rem; }
+            #info-panel .ipgrid { font-size: 0.44rem; gap: 5px 10px; }
+            #info-panel .ipdesc { font-size: 0.44rem; }
+            #info-panel .iphint { display: none; }
+            #cam-bar { top: 8px; left: 8px; gap: 2px; flex-wrap: wrap; }
+            .cbtn { font-size: 0.32rem; padding: 3px 5px; }
+            #neuron-drawer-btn { width: 24px; height: 48px; font-size: 0.55rem; }
+            #neuron-drawer { width: 200px; max-width: calc(100vw - 40px); }
+            #neuron-drawer .nopt { font-size: 0.4rem; padding: 4px 6px; }
+            #bottom-bar { bottom: 44px; max-width: 100vw; gap: 2px; }
+            #obs-toolbar { gap: 1px; }
+            .obs-btn { font-size: 0.3rem; padding: 2px 4px; }
+            #viz-modes { gap: 1px; }
+            .sig-btn { font-size: 0.28rem; padding: 2px 4px; }
+            #tools-bar { right: 6px; gap: 2px; }
+            .tool-btn { width: 26px; height: 26px; font-size: 0.4rem; }
+            #speed-control { left: 8px; bottom: 44px; gap: 4px; }
+            #speed-slider { width: 40px; }
+            #speed-control label { font-size: 0.3rem; }
+            #speed-val { font-size: 0.32rem; min-width: 16px; }
+        }
+
+        /* Small phone: ≤400px */
+        @media (max-width: 400px) {
+            .cbtn { font-size: 0.28rem; padding: 2px 4px; }
+            .obs-btn { font-size: 0.26rem; padding: 2px 3px; }
+            .sig-btn { font-size: 0.25rem; padding: 2px 3px; }
+            .tool-btn { width: 22px; height: 22px; font-size: 0.35rem; }
+            #speed-slider { width: 32px; }
+            #neuron-drawer .nopt { font-size: 0.36rem; padding: 3px 5px; }
+        }
+
+        /* Landscape phone */
+        @media (max-height: 500px) and (orientation: landscape) {
+            #cam-bar { gap: 2px; }
+            .cbtn { font-size: 0.28rem; padding: 2px 5px; }
+            #bottom-bar { bottom: 36px; }
+            .obs-btn { font-size: 0.26rem; padding: 2px 4px; }
+            .sig-btn { font-size: 0.25rem; padding: 2px 4px; }
+            #speed-control { bottom: 36px; }
+            #speed-slider { width: 36px; }
+            #neuron-drawer { padding-top: 40px; }
+            #neuron-drawer .nopt { font-size: 0.36rem; padding: 3px 5px; }
+            #info-panel { top: 40px; }
+            #info-panel .ipgrid { grid-template-columns: repeat(2,1fr); font-size: 0.4rem; }
+            #info-panel .ipdesc { display: none; }
+            .tool-btn { width: 24px; height: 24px; font-size: 0.36rem; }
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+            .ld-spinner { animation: none !important; }
+        }
+    </style>
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+            "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+        }
+    }
+    </script>
+</head>
+<body>
+    <div id="loading-screen">
+        <img src="assets/logo.png" alt="Neurix logo" class="ld-logo ld-logo-img">
+        <div style="position: relative; display: flex; align-items: center; justify-content: center;">
+            <div class="ld-spinner"></div>
+        </div>
+        <div class="ld-bar"><div class="ld-bar-fill"></div></div>
+        <div class="ld-step" id="ld-step">Initializing...</div>
+        <div style="margin-top: 20px; font-size: 0.5rem; letter-spacing: 0.06em; color: rgba(120,160,220,0.45); text-transform: uppercase;">A Jai Verse Product</div>
+    </div>
+    <div id="webgl-error"><div><div style="font-size:1.4rem;margin-bottom:12px">⚠</div>WebGL not supported.<br>Please use a modern browser.</div></div>
+
+    <button type="button" id="info-btn">Info</button>
+    <div id="info-panel" class="pg">
+        <div class="iph">
+            <div>
+                <div class="iptitle" id="info-title">Multipolar Neuron</div>
+                <div class="ipsub" id="info-sub">Interactive Neural Exploration</div>
+            </div>
+        </div>
+        <div class="ipgrid" id="info-grid"></div>
+        <div class="ipdesc" id="info-desc"></div>
+        <div class="iphint" id="info-hint">Left-drag: rotate 360° · Scroll / pinch: zoom · Right-drag: pan · Space: fire signal</div>
+        <div class="ipgrid" id="lab-stats" style="margin-top:8px">
+            <div><div class="ipl">Membrane V</div><div class="ipv" id="tele-mv">−70.0 mV</div></div>
+            <div><div class="ipl">Status</div><div class="ipv" id="tele-prop">Standby</div></div>
+        </div>
+    </div>
+
+    <div id="cam-bar">
+        <button type="button" class="cbtn" id="cam-zoom-in" title="Zoom in">Zoom In</button>
+        <button type="button" class="cbtn" id="cam-zoom-out" title="Zoom out">Zoom Out</button>
+        <button type="button" class="cbtn" id="cam-reset" title="Reset view">Reset</button>
+        <button type="button" class="cbtn" id="cam-orbit" title="Auto rotate">Orbit</button>
+    </div>
+
+    <button type="button" id="neuron-drawer-btn" title="Neuron types">▶</button>
+    <div id="neuron-drawer">
+        <div class="pg">
+            <div class="shdr">Neuron Type</div>
+            <div class="slist" id="neuron-list"></div>
+        </div>
+    </div>
+
+    <div id="tooltip">
+        <div class="ttn" id="tt-name">—</div>
+        <div class="ttt" id="tt-type">—</div>
+        <div class="ttr"><span class="ttl">Function</span><span class="ttv" id="tt-func">—</span></div>
+        <div class="ttr"><span class="ttl">Speed</span><span class="ttv" id="tt-speed">—</span></div>
+        <div class="tth">Click canvas to fire signal</div>
+    </div>
+
+    <div id="tools-bar">
+        <div class="tool-btn" id="tool-inject" title="Fire signal (Space)">Fire</div>
+        <div class="tool-btn" id="tool-auto" title="Auto stimulation">Auto</div>
+        <div class="tool-btn" id="tool-pause" title="Pause">Pause</div>
+        <div class="tool-btn" id="tool-reset-cam" title="Reset camera">Reset</div>
+    </div>
+
+    <div id="speed-control">
+        <label>Speed</label>
+        <input type="range" id="speed-slider" min="0.1" max="3" step="0.1" value="1">
+        <span id="speed-val">1×</span>
+    </div>
+
+    <!-- ─── FOOTER / COPYRIGHT ─── -->
+    <div id="footer">
+        <div id="footer-inner">
+            <span id="footer-copy"><strong> © 2026 Jai Gudivada . Neurix . All Rights Reserved </strong></span>
+            <span id="footer-div">|</span>
+        </div>
+    </div>
+
+    <div id="bottom-bar">
+        <div id="viz-modes">
+            <button type="button" class="sig-btn active" data-sigmode="0">Normal</button>
+            <button type="button" class="sig-btn" data-sigmode="3">Educational</button>
+            <button type="button" class="sig-btn" data-sigmode="2">Research</button>
+            <button type="button" class="sig-btn" data-sigmode="1">Heatmap</button>
+            <button type="button" class="sig-btn" data-sigmode="4">Signal</button>
+        </div>
+        <div id="obs-toolbar">
+            <button type="button" class="obs-btn active" data-mode="all">Show All</button>
+            <button type="button" class="obs-btn" data-mode="axons">Axons</button>
+            <button type="button" class="obs-btn" data-mode="dendrites">Dendrites</button>
+            <button type="button" class="obs-btn" data-mode="soma">Soma</button>
+            <button type="button" class="obs-btn" data-mode="synapses">Synapses</button>
+            <button type="button" class="obs-btn" data-mode="myelin">Myelin</button>
+            <button type="button" class="obs-btn" data-mode="wireframe">Wireframe</button>
+            <button type="button" class="obs-btn" data-mode="xray">X-Ray</button>
+            <button type="button" class="obs-btn" data-mode="heatmap">Heatmap</button>
+        </div>
+    </div>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+        import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+        import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+
+        /* ─────────────────────────────────────────────
+           CONSTANTS
+        ───────────────────────────────────────────── */
+        const STATE = { IDLE: 0, INCOMING: 1, FIRING: 2, REFRACTORY: 3 };
+        const PULSE_SPEED = 35, ACTIVATION_SPEED = 20, ACTIVATION_DURATION = 75;
+        const INPUT_LENGTH = 45, BASE_MV = -70, PEAK_MV = 40;
+        const UI_RATE = 6;
+
+        /* ─────────────────────────────────────────────
+           NEURON DATA (10 types)
+        ───────────────────────────────────────────── */
+        const NEURON_DATA = [
+            { name:'Multipolar', type:'Multipolar Neuron', function:'Signal Integration & Processing', location:'Brain & Spinal Cord', speed:'80–120 m/s', desc:'Primary CNS processor with extensive dendritic tree receiving thousands of synaptic inputs.', color:0x0088ff },
+            { name:'Bipolar', type:'Bipolar Neuron', function:'Sensory Signal Relay', location:'Retina, Inner Ear, Olfactory Epithelium', speed:'20–50 m/s', desc:'One dendrite and one axon; relays specialized sensory information to the CNS.', color:0x2288dd },
+            { name:'Unipolar', type:'Unipolar Neuron', function:'Sensory Reception', location:'Peripheral Nervous System', speed:'30–70 m/s', desc:'Single process splits into peripheral receptor branch and central branch.', color:0x3399ee },
+            { name:'Pseudounipolar', type:'Pseudounipolar Neuron', function:'Somatosensory Transmission', location:'Dorsal Root Ganglia', speed:'40–80 m/s', desc:'T-shaped axon carrying touch, pain, and proprioception to the spinal cord.', color:0x22aacc },
+            { name:'Purkinje Cell', type:'Purkinje Cell', function:'Motor Coordination', location:'Cerebellum', speed:'100–120 m/s', desc:'Massive fan-shaped dendritic arbor coordinating balance and fine motor control.', color:0x9900ff },
+            { name:'Pyramidal', type:'Pyramidal Neuron', function:'Cognitive Processing', location:'Cerebral Cortex', speed:'60–100 m/s', desc:'Triangular soma with apical dendrite; primary cortical excitatory neuron.', color:0xff00cc },
+            { name:'Interneuron', type:'Interneuron', function:'Local Circuit Modulation', location:'CNS Local Circuits', speed:'10–40 m/s', desc:'Short-axon neuron regulating local circuit timing and inhibition.', color:0x00ff88 },
+            { name:'Motor Neuron', type:'Motor Neuron', function:'Muscle Contraction', location:'Spinal Cord → Muscles', speed:'80–120 m/s', desc:'Efferent neuron driving voluntary and reflex muscle contraction.', color:0xff6600 },
+            { name:'Sensory Neuron', type:'Sensory Neuron', function:'Environmental Sensation', location:'Skin & Organs → CNS', speed:'20–70 m/s', desc:'Afferent neuron transducing touch, temperature, pain, and pressure.', color:0x0055ff },
+            { name:'Myelinated', type:'Myelinated Neuron', function:'Saltatory Conduction', location:'PNS & CNS', speed:'120 m/s', desc:'Myelin-insulated axon demonstrating rapid saltatory signal propagation.', color:0xffffff },
+        ];
+
+        const SIGNAL_COLORS = NEURON_DATA.map(n => new THREE.Color(n.color));
+        const DEFAULT_CAM = { pos: new THREE.Vector3(0, 8, 46), target: new THREE.Vector3(0, 0, 0) };
+
+        /* ─────────────────────────────────────────────
+           DOM REFERENCES
+        ───────────────────────────────────────────── */
+        const $ = id => document.getElementById(id);
+        const loadingEl = $('loading-screen'), ldStep = $('ld-step'), webglErrorEl = $('webgl-error');
+        const elMv = $('tele-mv'), elProp = $('tele-prop');
+        const elInfoTitle = $('info-title'), elInfoSub = $('info-sub'), elInfoGrid = $('info-grid'), elInfoDesc = $('info-desc'), elInfoHint = $('info-hint');
+        const elNeuronList = $('neuron-list');
+        const elSpeedSlider = $('speed-slider'), elSpeedVal = $('speed-val');
+        const elTooltip = $('tooltip'), elTTName = $('tt-name'), elTTType = $('tt-type'), elTTFunc = $('tt-func'), elTTSpeed = $('tt-speed');
+
+        /* ─────────────────────────────────────────────
+           APP STATE
+        ───────────────────────────────────────────── */
+        let scene, camera, renderer, controls, composer, bloomPass, clock;
+        let time = 0, frameCount = 0;
+        let currentNeuronType = 0, currentNeuronIndex = 0;
+        let viewMode = 'all', signalMode = 0;
+        let paused = false, speedMul = 1;
+        let autoSim = false;
+        let useBloom = true;
+        let state = STATE.IDLE, pulseProg = -10, actProg = 0;
+        let mvBase = BASE_MV, mvTarget = BASE_MV, refractoryTimer = 0;
+        let autoTimer = 0;
+
+        let neuronGroups = [], allMaterials = [], synapseMeshes = [], myelinMeshes = [];
+
+        let mouseX = 0, mouseY = 0;
+        const pointerNDC = new THREE.Vector2();
+        const raycaster = new THREE.Raycaster();
+        const camOffset = new THREE.Vector3();
+        const energySmooth = new THREE.Vector3();
+        const energyTarget = new THREE.Vector3();
+
+        /* ─────────────────────────────────────────────
+           SCENE SETUP
+        ───────────────────────────────────────────── */
+        function checkWebGL() {
+            try { const c = document.createElement('canvas'); if (!c.getContext('webgl') && !c.getContext('experimental-webgl')) { webglErrorEl.classList.add('visible'); return false; } }
+            catch(e) { webglErrorEl.classList.add('visible'); return false; }
+            return true;
+        }
+
+        function initScene() {
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x030810);
+            scene.fog = new THREE.FogExp2(0x030810, 0.012);
+
+            camera = new THREE.PerspectiveCamera(50, innerWidth / innerHeight, 0.1, 500);
+            camera.position.copy(DEFAULT_CAM.pos);
+
+            renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
+            renderer.setSize(innerWidth, innerHeight);
+            renderer.setPixelRatio(Math.min(devicePixelRatio, 1.25));
+            renderer.toneMapping = THREE.ACESFilmicToneMapping;
+            renderer.toneMappingExposure = 1.15;
+            renderer.shadowMap.enabled = false;
+            document.body.prepend(renderer.domElement);
+
+            controls = new OrbitControls(camera, renderer.domElement);
+            controls.target.copy(DEFAULT_CAM.target);
+            controls.enableDamping = true;
+            controls.dampingFactor = 0.08;
+            controls.rotateSpeed = 0.65;
+            controls.zoomSpeed = 1.1;
+            controls.enableZoom = true;
+            controls.enablePan = true;
+            controls.panSpeed = 0.55;
+            controls.screenSpacePanning = true;
+            controls.autoRotate = false;
+            controls.autoRotateSpeed = 0.35;
+            controls.maxDistance = 95;
+            controls.minDistance = 8;
+            controls.minPolarAngle = 0;
+            controls.maxPolarAngle = Math.PI;
+            controls.mouseButtons = {
+                LEFT: THREE.MOUSE.ROTATE,
+                MIDDLE: THREE.MOUSE.DOLLY,
+                RIGHT: THREE.MOUSE.PAN,
+            };
+            controls.touches = {
+                ONE: THREE.TOUCH.ROTATE,
+                TWO: THREE.TOUCH.DOLLY_PAN,
+            };
+
+            const rp = new RenderPass(scene, camera);
+            bloomPass = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 1.2, 0.35, 0.9);
+            bloomPass.threshold = 0.55;
+            bloomPass.strength = 1.1;
+
+            composer = new EffectComposer(renderer);
+            composer.addPass(rp);
+            composer.addPass(bloomPass);
+            clock = new THREE.Clock();
+
+            const ambient = new THREE.AmbientLight(0x112244, 1.2);
+            scene.add(ambient);
+            const dirLight = new THREE.DirectionalLight(0x4488ff, 0.8);
+            dirLight.position.set(5, 10, 8);
+            scene.add(dirLight);
+            const dirLight2 = new THREE.DirectionalLight(0x002244, 0.4);
+            dirLight2.position.set(-5, -5, -5);
+            scene.add(dirLight2);
+
+            window.addEventListener('resize', () => {
+                camera.aspect = innerWidth / innerHeight;
+                camera.updateProjectionMatrix();
+                renderer.setSize(innerWidth, innerHeight);
+                composer.setSize(innerWidth, innerHeight);
+                bloomPass.setSize(innerWidth, innerHeight);
+            });
+        }
+
+        function zoomCamera(factor) {
+            camOffset.subVectors(camera.position, controls.target);
+            const dist = THREE.MathUtils.clamp(camOffset.length() * factor, controls.minDistance, controls.maxDistance);
+            camOffset.setLength(dist);
+            camera.position.copy(controls.target).add(camOffset);
+        }
+
+        function resetCamera() {
+            camera.position.copy(DEFAULT_CAM.pos);
+            controls.target.copy(DEFAULT_CAM.target);
+            controls.update();
+        }
+
+        function toggleAutoRotate() {
+            controls.autoRotate = !controls.autoRotate;
+            $('cam-orbit').classList.toggle('active', controls.autoRotate);
+        }
+
+        function showInfo(data, sub) {
+            elInfoTitle.textContent = data.name || '—';
+            elInfoSub.textContent = sub || data.type || '';
+            elInfoGrid.innerHTML = `
+                <div><div class="ipl">Function</div><div class="ipv">${data.function || '—'}</div></div>
+                <div><div class="ipl">Location</div><div class="ipv">${data.location || '—'}</div></div>
+                <div><div class="ipl">Signal Speed</div><div class="ipv">${data.speed || '—'}</div></div>
+                <div><div class="ipl">Type</div><div class="ipv">${data.type || '—'}</div></div>`;
+            elInfoDesc.textContent = data.desc || '';
+        }
+
+        function renderFrame() {
+            if (useBloom && composer) composer.render();
+            else if (renderer && scene && camera) renderer.render(scene, camera);
+        }
+
+        /* ─────────────────────────────────────────────
+           NEURON SHADER MATERIAL
+        ───────────────────────────────────────────── */
+        function createNeuronMaterial(neuronTypeIdx) {
+            const sc = SIGNAL_COLORS[neuronTypeIdx] || SIGNAL_COLORS[0];
+
+            const vertexShader = `
+                attribute float aType;
+                attribute float aDendriteOrder;
+                varying vec2 vUv;
+                varying vec3 vWorldPos;
+                varying vec3 vNormal;
+                varying float vType;
+                varying float vDist;
+                void main() {
+                    vUv = uv; vType = aType;
+                    vec4 wp = modelMatrix * vec4(position,1.0);
+                    vWorldPos = wp.xyz;
+                    vDist = length(wp.xyz);
+                    vNormal = normalize(normalMatrix * normal);
+                    gl_Position = projectionMatrix * viewMatrix * wp;
+                }
+            `;
+
+            const fragmentShader = `
+                uniform float uTime;
+                uniform float uPulseProgress;
+                uniform float uActivation;
+                uniform vec3 uCameraPos;
+                uniform float uEnergy;
+                uniform vec3 uEnergyPos;
+                uniform float uEnergyRadius;
+                uniform float uViewMode;
+                uniform float uOpacity;
+                uniform float uColorMode;
+                uniform vec3 uSigColor;
+                varying vec2 vUv;
+                varying vec3 vWorldPos;
+                varying vec3 vNormal;
+                varying float vType;
+                varying float vDist;
+
+                float hash(vec3 p){p=fract(p*.3183099+.1);p*=17.;return fract(p.x*p.y*p.z*(p.x+p.y+p.z));}
+                float noise(vec3 x){vec3 i=floor(x),f=fract(x);f=f*f*(3.-2.*f);
+                    return mix(mix(mix(hash(i),hash(i+vec3(1,0,0)),f.x),mix(hash(i+vec3(0,1,0)),hash(i+vec3(1,1,0)),f.x),f.y),
+                               mix(mix(hash(i+vec3(0,0,1)),hash(i+vec3(1,0,1)),f.x),mix(hash(i+vec3(0,1,1)),hash(i+vec3(1,1,1)),f.x),f.y),f.z);}
+
+                vec3 applyColorMode(vec3 base, float intensity, float mode){
+                    if(mode<0.5) return base*intensity;
+                    if(mode<1.5){float h=clamp(intensity,0.,1.);return mix(vec3(0,0,.5),mix(vec3(1,0,0),vec3(1,1,0),h),h)*intensity;}
+                    if(mode<2.5){return vec3(.7,.9,1.)*intensity*(0.5+0.5*sin(intensity*10.));}
+                    if(mode<3.5){return mix(vec3(0,.2,1.),vec3(1,0,.5),intensity)*intensity*1.6;}
+                    return uSigColor*intensity;
+                }
+
+                void main(){
+                    vec3 viewDir=normalize(uCameraPos-vWorldPos);
+                    float fresnel=pow(1.-max(dot(vNormal,viewDir),0.),3.);
+                    float n1=noise(vWorldPos*.5+uTime*.18);
+                    float n2=noise(vWorldPos*2.-uTime*.45);
+
+                    vec3 resting=vec3(.004,.01,.022)+vec3(.035,.1,.16)*fresnel*n1;
+                    resting*=(0.5+0.5*n2);
+                    vec3 lowAct=vec3(0.,.18,.18)*fresnel*.45;
+
+                    vec3 energyColor=vec3(0);
+                    if(uEnergy>0.){
+                        float d=length(vWorldPos-uEnergyPos);
+                        float eI=exp(-d*d/(uEnergyRadius*uEnergyRadius))*uEnergy;
+                        vec3 sc=mix(vec3(0.,.52,1.),vec3(.55,.88,1.),eI);
+                        energyColor=sc*eI*2.6*(0.5+0.5*fresnel);
+                    }
+
+                    vec3 baseColor=resting+lowAct+energyColor;
+
+                    vec3 pulseColor=vec3(0);
+                    if(uPulseProgress>-5.){
+                        float pD=abs(vDist-uPulseProgress);
+                        float core=exp(-pD*pD*3.);
+                        float trail=smoothstep(6.,0.,vDist-uPulseProgress)*smoothstep(-2.,0.,uPulseProgress-vDist);
+                        float pi=max(core*1.4,trail*.65);
+                        pulseColor=uSigColor*pi*(0.55+0.14*n2);
+                    }
+
+                    vec3 actColor=vec3(0);
+                    if(uActivation>0.){
+                        float dFW=vDist-uActivation;
+                        float wF=exp(-pow(dFW,2.)*.2)*step(0.,-dFW);
+                        float res=smoothstep(uActivation,uActivation-25.,vDist);
+                        float aI=wF*2.2+res*.88;
+                        aI*=(0.6+0.4*noise(vWorldPos*1.5-uTime*2.));
+                        float t=clamp(aI/3.,0.,1.);
+                        vec3 c1=mix(uSigColor,vec3(1.,0.,.7),smoothstep(0.,1.,t));
+                        vec3 c2=mix(c1,vec3(1.),smoothstep(.6,1.,t));
+                        actColor=applyColorMode(c2,aI,uColorMode)*.88;
+                        if(vDist<4.){float sf=exp(-pow(uActivation*.2,2.))*1.4;actColor+=vec3(1.,.94,.88)*sf;}
+                    }
+
+                    vec3 final=baseColor+pulseColor+actColor;
+
+                    float alpha=uOpacity;
+                    if(uViewMode==1.&&vType!=1.) discard;
+                    if(uViewMode==2.&&vType!=2.) discard;
+                    if(uViewMode==3.&&vType!=3.) discard;
+                    if(uViewMode==4.) discard;
+                    if(uViewMode==5.) discard;
+                    if(uViewMode==6.){final=vec3(0.,.48,.7);if(fresnel<.1) discard;}
+                    if(uViewMode==7.){alpha=.14+fresnel*.28;final=vec3(.1,.38,.58)*(0.5+fresnel*.5);}
+                    if(uViewMode==8.){float heat=noise(vWorldPos*.3+uTime*.1)*.5+actColor.g*.5;final=mix(vec3(0,0,.5),mix(vec3(1,0,0),vec3(1,1,0),heat),heat);}
+
+                    gl_FragColor=vec4(final,alpha);
+                }
+            `;
+
+            const mat = new THREE.ShaderMaterial({
+                vertexShader, fragmentShader,
+                uniforms: {
+                    uTime: { value: 0 }, uPulseProgress: { value: -10 }, uActivation: { value: 0 },
+                    uCameraPos: { value: new THREE.Vector3() }, uEnergy: { value: 0 },
+                    uEnergyPos: { value: new THREE.Vector3() }, uEnergyRadius: { value: 10 },
+                    uViewMode: { value: 0 }, uOpacity: { value: 1 },
+                    uColorMode: { value: 0 }, uSigColor: { value: sc.clone() },
+                },
+                transparent: true, depthWrite: true, side: THREE.DoubleSide,
+            });
+            allMaterials.push(mat);
+            return mat;
+        }
+
+        /* ─────────────────────────────────────────────
+           NEURON GEOMETRY HELPERS
+        ───────────────────────────────────────────── */
+        function createWanderingPath(start, dir, length, segments, jitter, endPt) {
+            const pts = [start.clone()];
+            let curr = start.clone(), cDir = dir.clone().normalize();
+            const step = length / segments, j = jitter * 0.55;
+            for (let i = 0; i < segments; i++) {
+                const fade = 1 - (i/segments)*0.35;
+                cDir.x += (Math.random()-.5)*j*fade;
+                cDir.y += (Math.random()-.5)*j*fade;
+                cDir.z += (Math.random()-.5)*j*fade;
+                cDir.normalize();
+                curr = curr.clone().add(cDir.clone().multiplyScalar(step));
+                pts.push(curr);
+            }
+            if (endPt) { pts[pts.length-1] = endPt.clone().lerp(pts[pts.length-1],.35); pts.push(endPt.clone()); }
+            return new THREE.CatmullRomCurve3(pts, false, 'centripetal');
+        }
+
+        function taperGeometry(geo, baseRadius, isInput) {
+            const pos = geo.attributes.position, norm = geo.attributes.normal, uv = geo.attributes.uv;
+            for (let i = 0; i < pos.count; i++) {
+                const u = uv.getX(i), t = isInput ? 1 : (1-u), taper = Math.pow(t, 0.6), shrink = baseRadius*(1-taper);
+                pos.setXYZ(i, pos.getX(i)-norm.getX(i)*shrink, pos.getY(i)-norm.getY(i)*shrink, pos.getZ(i)-norm.getZ(i)*shrink);
+            }
+            geo.computeVertexNormals();
+        }
+
+        function addBranch(curve, radius, type, mat, group, segments) {
+            const s = segments || Math.max(12, Math.floor(curve.getLength()*4));
+            const geo = new THREE.TubeGeometry(curve, s, radius, 8, false);
+            taperGeometry(geo, radius, type===1);
+            geo.setAttribute('aType', new THREE.BufferAttribute(new Float32Array(geo.attributes.position.count).fill(type), 1));
+            geo.setAttribute('aDendriteOrder', new THREE.BufferAttribute(new Float32Array(geo.attributes.position.count).fill(0), 1));
+            const mesh = new THREE.Mesh(geo, mat);
+            group.add(mesh);
+            return mesh;
+        }
+
+        function createSoma(radius, detail, mat, group) {
+            const seg = Math.max(24, (detail||12)*2);
+            const geo = new THREE.SphereGeometry(radius, seg, seg);
+            geo.computeVertexNormals();
+            geo.setAttribute('aType', new THREE.BufferAttribute(new Float32Array(geo.attributes.position.count).fill(3), 1));
+            geo.setAttribute('aDendriteOrder', new THREE.BufferAttribute(new Float32Array(geo.attributes.position.count).fill(0), 1));
+            const mesh = new THREE.Mesh(geo, mat);
+            group.add(mesh);
+            return mesh;
+        }
+
+        /* ─────────────────────────────────────────────
+           NEURON GENERATORS
+        ───────────────────────────────────────────── */
+        function generateMultipolar(mat, group) {
+            createSoma(3.3, 14, mat, group);
+            const inputCurve = createWanderingPath(new THREE.Vector3(-45,0,0), new THREE.Vector3(1,0,0), 46, 30, 0.05, new THREE.Vector3(-3,0,0));
+            addBranch(inputCurve, 0.6, 1, mat, group);
+            for (let i = 0; i < 14; i++) {
+                let phi = Math.random()*Math.PI*2, theta = Math.acos(Math.random()*2-1);
+                if (Math.cos(phi)*Math.sin(theta) < -0.3) phi = phi>Math.PI ? phi-Math.PI : phi+Math.PI;
+                const sd = new THREE.Vector3(Math.cos(phi)*Math.sin(theta), Math.sin(phi)*Math.sin(theta), Math.cos(theta));
+                const start = sd.clone().multiplyScalar(2.5), length = 18+Math.random()*35, mainR = 0.35+Math.random()*0.3;
+                const mc = createWanderingPath(start, sd, length, 22+Math.floor(Math.random()*8), 0.35);
+                addBranch(mc, mainR, 2, mat, group);
+                const sub = 2+Math.floor(Math.random()*4);
+                for (let j = 0; j < sub; j++) {
+                    const t = 0.25+Math.random()*0.55, bs = mc.getPoint(t), tan = mc.getTangent(t);
+                    const rv = new THREE.Vector3(Math.random()-.5,Math.random()-.5,Math.random()-.5).normalize();
+                    const bd = tan.clone().cross(rv).normalize().add(tan.clone().multiplyScalar(0.4)).normalize();
+                    addBranch(createWanderingPath(bs, bd, (1-t)*length*(0.35+Math.random()*0.35), 12, 0.5), mainR*(1-t)*0.75, 2, mat, group);
+                }
+            }
+        }
+
+        function generateBipolar(mat, group) {
+            createSoma(2.8, 12, mat, group);
+            const dend = createWanderingPath(new THREE.Vector3(-35,0,0), new THREE.Vector3(1,0,0), 36, 20, 0.15, new THREE.Vector3(-2.2,0,0));
+            addBranch(dend, 0.7, 1, mat, group);
+            const axon = createWanderingPath(new THREE.Vector3(2.2,0,0), new THREE.Vector3(1,0.1,0), 40, 25, 0.1);
+            addBranch(axon, 0.5, 2, mat, group);
+        }
+
+        function generateUnipolar(mat, group) {
+            createSoma(2.5, 10, mat, group);
+            addBranch(createWanderingPath(new THREE.Vector3(-40,0,0), new THREE.Vector3(1,0,0), 45, 28, 0.08), 0.55, 1, mat, group);
+        }
+
+        function generatePseudounipolar(mat, group) {
+            createSoma(2.6, 11, mat, group);
+            const trunk = createWanderingPath(new THREE.Vector3(-5,0,0), new THREE.Vector3(1,0.05,0), 8, 8, 0.2);
+            addBranch(trunk, 0.6, 1, mat, group);
+            const sp = trunk.getPoint(1);
+            addBranch(createWanderingPath(sp, new THREE.Vector3(1,0.2,0.1), 30, 18, 0.12), 0.45, 2, mat, group);
+            addBranch(createWanderingPath(sp, new THREE.Vector3(-1,-0.1,0), 20, 14, 0.1), 0.45, 1, mat, group);
+        }
+
+        function generatePurkinje(mat, group) {
+            createSoma(2.8, 12, mat, group);
+            addBranch(createWanderingPath(new THREE.Vector3(2.2,0,0), new THREE.Vector3(1,0,0), 35, 20, 0.08), 0.4, 1, mat, group);
+            for (let i = 0; i < 16; i++) {
+                const phi = -0.8+Math.random()*1.6, theta = 0.2+Math.random()*1.4;
+                const sd = new THREE.Vector3(Math.cos(phi)*Math.sin(theta)*0.5-0.5, Math.sin(phi)*Math.sin(theta)+0.5, Math.cos(theta)*0.3).normalize();
+                const start = sd.clone().multiplyScalar(2.2), length = 14+Math.random()*25, mainR = 0.15+Math.random()*0.2;
+                const mc = createWanderingPath(start, sd, length, 18+Math.floor(Math.random()*10), 0.5);
+                addBranch(mc, mainR, 2, mat, group, Math.floor(mc.getLength()*4));
+                const subs = 3+Math.floor(Math.random()*6);
+                for (let j = 0; j < subs; j++) {
+                    const t = 0.2+Math.random()*0.6, bs = mc.getPoint(t), tan = mc.getTangent(t);
+                    const rv = new THREE.Vector3(Math.random()-.5,Math.random()-.5,Math.random()-.5).normalize();
+                    const bd = tan.clone().cross(rv).normalize().add(tan.clone().multiplyScalar(0.3)).normalize();
+                    addBranch(createWanderingPath(bs, bd, (1-t)*length*(0.3+Math.random()*0.3), 10, 0.6), mainR*(1-t)*0.7, 2, mat, group, 8);
+                }
+            }
+        }
+
+        function generatePyramidal(mat, group) {
+            createSoma(3.0, 13, mat, group);
+            const apDir = new THREE.Vector3(-0.3,1,0).normalize();
+            const apStart = apDir.clone().multiplyScalar(2.4);
+            const apical = createWanderingPath(apStart, apDir, 30, 20, 0.25);
+            addBranch(apical, 0.35, 2, mat, group);
+            for (let i = 0; i < 8; i++) {
+                const t = 0.7+Math.random()*0.3, bs = apical.getPoint(t), tan = apical.getTangent(t);
+                const rv = new THREE.Vector3(Math.random()-.5,Math.random()-.5,Math.random()-.5).normalize();
+                const bd = tan.clone().cross(rv).normalize().add(tan.clone().multiplyScalar(0.5)).normalize();
+                addBranch(createWanderingPath(bs, bd, 8+Math.random()*12, 10, 0.4), 0.2, 2, mat, group);
+            }
+            for (let i = 0; i < 12; i++) {
+                const phi = Math.random()*Math.PI*2, theta = 1+Math.random()*1;
+                const dir = new THREE.Vector3(Math.cos(phi)*Math.sin(theta), -Math.sin(phi)*Math.sin(theta)*0.3, Math.cos(theta)).normalize();
+                const start = dir.clone().multiplyScalar(2.4);
+                addBranch(createWanderingPath(start, dir, 12+Math.random()*20, 14+Math.floor(Math.random()*6), 0.4), 0.25+Math.random()*0.15, 2, mat, group);
+            }
+            addBranch(createWanderingPath(new THREE.Vector3(0,-0.5,1).normalize().multiplyScalar(2.4), new THREE.Vector3(0,-0.5,1).normalize(), 40, 25, 0.08), 0.35, 1, mat, group);
+        }
+
+        function generateInterneuron(mat, group) {
+            createSoma(2.4, 10, mat, group);
+            for (let i = 0; i < 16; i++) {
+                const dir = new THREE.Vector3(Math.random()-.5,Math.random()-.5,Math.random()-.5).normalize();
+                const start = dir.clone().multiplyScalar(2), length = 5+Math.random()*12;
+                addBranch(createWanderingPath(start, dir, length, 8+Math.floor(Math.random()*6), 0.5), 0.1+Math.random()*0.18, 2, mat, group, Math.floor(length*2));
+            }
+            addBranch(createWanderingPath(new THREE.Vector3(0,0,1).normalize().multiplyScalar(2), new THREE.Vector3(0,0,1), 15, 10, 0.08), 0.25, 1, mat, group);
+        }
+
+        function generateMotor(mat, group) {
+            createSoma(3.5, 14, mat, group);
+            const axDir = new THREE.Vector3(0,0,1).normalize();
+            addBranch(createWanderingPath(axDir.clone().multiplyScalar(2.8), axDir, 60, 30, 0.06), 0.7, 1, mat, group);
+            for (let i = 0; i < 14; i++) {
+                const dir = new THREE.Vector3(Math.random()-.5,Math.random()-.5,Math.random()-.5).normalize();
+                const start = dir.clone().multiplyScalar(2.8), length = 15+Math.random()*25;
+                addBranch(createWanderingPath(start, dir, length, 16+Math.floor(Math.random()*8), 0.35), 0.3+Math.random()*0.2, 2, mat, group);
+            }
+        }
+
+        function generateSensory(mat, group) {
+            createSoma(2.7, 11, mat, group);
+            const sensDir = new THREE.Vector3(-1,0.1,0).normalize();
+            addBranch(createWanderingPath(sensDir.clone().multiplyScalar(50), sensDir.clone().negate(), 55, 30, 0.08), 0.5, 1, mat, group);
+            const axDir = new THREE.Vector3(1,0,0.2).normalize();
+            addBranch(createWanderingPath(axDir.clone().multiplyScalar(2.2), axDir, 40, 22, 0.05), 0.45, 1, mat, group);
+            for (let i = 0; i < 8; i++) {
+                const dir = new THREE.Vector3(Math.random()-.5,Math.random()-.5,Math.random()-.5).normalize();
+                addBranch(createWanderingPath(dir.clone().multiplyScalar(2.2), dir, 8+Math.random()*15, 10, 0.4), 0.2+Math.random()*0.1, 2, mat, group);
+            }
+        }
+
+        function generateMyelinated(mat, group) {
+            createSoma(2.6, 11, mat, group);
+            const axDir = new THREE.Vector3(1,0.05,0.03).normalize();
+            const totalLen = 55, axon = createWanderingPath(axDir.clone().multiplyScalar(2.1), axDir, totalLen, 25, 0.06);
+            addBranch(axon, 0.35, 1, mat, group);
+            const segLen = 3.5, gapLen = 1.0; let segPos = 5;
+            while (segPos < totalLen-5) {
+                const pt = axon.getPoint(segPos/totalLen), tan = axon.getTangent(segPos/totalLen);
+                const segCurve = createWanderingPath(pt.clone().add(tan.clone().multiplyScalar(-segLen/2)), tan, segLen, 6, 0.02);
+                const segGeo = new THREE.TubeGeometry(segCurve, 8, 0.55, 10, false);
+                const cc = 0.9+Math.random()*0.1;
+                const segMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(cc, cc*0.94, cc*0.84), transparent: true, opacity: 0.32 });
+                const segMesh = new THREE.Mesh(segGeo, segMat);
+                group.add(segMesh); myelinMeshes.push(segMesh);
+                if (segPos+segLen+gapLen/2 < totalLen-5) {
+                    const nodePt = axon.getPoint((segPos+segLen)/totalLen), nodeTan = axon.getTangent((segPos+segLen)/totalLen);
+                    const nodeCurve = createWanderingPath(nodePt.clone().add(nodeTan.clone().multiplyScalar(-gapLen/2)), nodeTan, gapLen, 4, 0.01);
+                    const nodeGeo = new THREE.TubeGeometry(nodeCurve, 6, 0.25, 8, false);
+                    group.add(new THREE.Mesh(nodeGeo, new THREE.MeshBasicMaterial({ color: 0x00aaff, transparent: true, opacity: 0.7 })));
+                }
+                segPos += segLen+gapLen;
+            }
+            for (let i = 0; i < 12; i++) {
+                const dir = new THREE.Vector3(Math.random()-.5,Math.random()-.5,Math.random()-.5).normalize();
+                addBranch(createWanderingPath(dir.clone().multiplyScalar(2.1), dir, 12+Math.random()*20, 12+Math.floor(Math.random()*6), 0.35), 0.25+Math.random()*0.15, 2, mat, group);
+            }
+        }
+
+        function generateAutonomic(mat, group) {
+            createSoma(2.2, 9, mat, group);
+            for (let side = -1; side <= 1; side += 2) {
+                const chainDir = new THREE.Vector3(0, 1, 0.05).normalize();
+                const chainStart = new THREE.Vector3(side*2.5, -20, 0);
+                const chain = createWanderingPath(chainStart, chainDir, 45, 28, 0.04);
+                addBranch(chain, 0.22, 1, mat, group);
+                for (let i = 0; i < 10; i++) {
+                    const t = i/10, pt = chain.getPoint(t);
+                    const gg = new THREE.SphereGeometry(0.35, 8, 8);
+                    gg.setAttribute('aType', new THREE.BufferAttribute(new Float32Array(gg.attributes.position.count).fill(3), 1));
+                    gg.setAttribute('aDendriteOrder', new THREE.BufferAttribute(new Float32Array(gg.attributes.position.count).fill(0), 1));
+                    const gm = new THREE.Mesh(gg, mat);
+                    gm.position.copy(pt);
+                    group.add(gm);
+                    addBranch(createWanderingPath(pt, new THREE.Vector3(-side, 0, 0.1), 4, 5, 0.1), 0.1, 1, mat, group);
+                }
+            }
+            for (let i = 0; i < 18; i++) {
+                const dir = new THREE.Vector3(Math.random()-.5, Math.random()*.3, Math.random()-.5).normalize();
+                addBranch(createWanderingPath(dir.clone().multiplyScalar(2.2), dir, 12+Math.random()*18, 10, 0.35), 0.1+Math.random()*0.1, 2, mat, group);
+            }
+        }
+
+        function generateCranialNerve(mat, group) {
+            createSoma(3.2, 13, mat, group);
+            const trunkDir = new THREE.Vector3(0, 0, 1).normalize();
+            const trunk = createWanderingPath(new THREE.Vector3(0, 0, 2.5), trunkDir, 20, 14, 0.06);
+            addBranch(trunk, 0.9, 1, mat, group);
+            const branchDirs = [
+                [1, 0.5, 0.8], [-1, 0.5, 0.8], [0.7, 0, 1], [-0.7, 0, 1],
+                [0.4, -0.6, 1], [-0.4, -0.6, 1], [0, 0.8, 0.6], [0, -0.5, 1],
+            ];
+            branchDirs.forEach(([x,y,z], i) => {
+                const t = 0.3+i*0.08, pt = trunk.getPoint(Math.min(t, 0.95)), tan = trunk.getTangent(Math.min(t, 0.95));
+                const dir = new THREE.Vector3(x,y,z).normalize().add(tan.clone().multiplyScalar(0.4)).normalize();
+                const len = 10+Math.random()*20;
+                const branch = createWanderingPath(pt, dir, len, 12, 0.12);
+                addBranch(branch, 0.28+Math.random()*0.18, 2, mat, group);
+                for (let j = 0; j < 3; j++) {
+                    const t2 = 0.4+j*0.2, pt2 = branch.getPoint(t2), tan2 = branch.getTangent(t2);
+                    const rv = new THREE.Vector3(Math.random()-.5,Math.random()-.5,Math.random()-.5).normalize();
+                    const bd = tan2.clone().cross(rv).normalize().add(tan2.multiplyScalar(0.3)).normalize();
+                    addBranch(createWanderingPath(pt2, bd, len*(1-t2)*0.5, 8, 0.3), 0.1, 2, mat, group);
+                }
+            });
+        }
+
+        function generatePeripheralBundle(mat, group) {
+            const outerCurve = createWanderingPath(new THREE.Vector3(-30, 0, 0), new THREE.Vector3(1, 0.02, 0), 62, 35, 0.04);
+            const outerGeo = new THREE.TubeGeometry(outerCurve, 40, 1.2, 12, false);
+            outerGeo.setAttribute('aType', new THREE.BufferAttribute(new Float32Array(outerGeo.attributes.position.count).fill(1), 1));
+            outerGeo.setAttribute('aDendriteOrder', new THREE.BufferAttribute(new Float32Array(outerGeo.attributes.position.count).fill(0), 1));
+            group.add(new THREE.Mesh(outerGeo, mat));
+            const offsets = [[-0.45, 0.35, 0], [0.5, 0.2, 0], [0, -0.5, 0]];
+            offsets.forEach(([ox, oy, oz]) => {
+                const fascDir = new THREE.Vector3(1, 0.015, 0.01).normalize();
+                const fascStart = new THREE.Vector3(-28+ox*2, oy*2, oz*2);
+                const fascCurve = createWanderingPath(fascStart, fascDir, 58, 30, 0.06);
+                addBranch(fascCurve, 0.32, 1, mat, group);
+                for (let i = 0; i < 6; i++) {
+                    const aDir = new THREE.Vector3(1, (Math.random()-.5)*0.04, (Math.random()-.5)*0.04).normalize();
+                    const aPt = new THREE.Vector3(-26+ox*2+(Math.random()-.5)*0.4, oy*2+(Math.random()-.5)*0.25, oz*2+(Math.random()-.5)*0.25);
+                    addBranch(createWanderingPath(aPt, aDir, 52+Math.random()*6, 25, 0.025), 0.06+Math.random()*0.04, 1, mat, group);
+                }
+            });
+            for (let i = 0; i < 5; i++) {
+                const t = 0.1+i*0.18, pt = outerCurve.getPoint(t);
+                const sg = new THREE.SphereGeometry(0.22, 7, 7);
+                sg.setAttribute('aType', new THREE.BufferAttribute(new Float32Array(sg.attributes.position.count).fill(3), 1));
+                sg.setAttribute('aDendriteOrder', new THREE.BufferAttribute(new Float32Array(sg.attributes.position.count).fill(0), 1));
+                const sm = new THREE.Mesh(sg, mat);
+                sm.position.copy(pt).add(new THREE.Vector3(0, 0.8, 0));
+                group.add(sm);
+            }
+        }
+
+        function generateSpinalNetwork(mat, group) {
+            createSoma(2.8, 12, mat, group);
+            const dorsalDir = new THREE.Vector3(0, 1, 0.1).normalize();
+            const dorsal = createWanderingPath(new THREE.Vector3(0, 2.5, 0), dorsalDir, 18, 14, 0.06);
+            addBranch(dorsal, 0.5, 2, mat, group);
+            for (let i = 0; i < 8; i++) {
+                const t = 0.3+i*0.08, bs = dorsal.getPoint(t), tan = dorsal.getTangent(t);
+                const rv = new THREE.Vector3(Math.random()-.5,Math.random()-.5,Math.random()-.5).normalize();
+                const bd = tan.clone().cross(rv).normalize().add(tan.multiplyScalar(0.4)).normalize();
+                addBranch(createWanderingPath(bs, bd, 6+Math.random()*12, 8, 0.4), 0.18+Math.random()*0.1, 2, mat, group);
+            }
+            const ventralDir = new THREE.Vector3(0, -1, 0.1).normalize();
+            const ventral = createWanderingPath(new THREE.Vector3(0, -2.5, 0), ventralDir, 16, 12, 0.07);
+            addBranch(ventral, 0.55, 1, mat, group);
+            for (let i = 0; i < 6; i++) {
+                const t = 0.2+i*0.12, bs = ventral.getPoint(t), tan = ventral.getTangent(t);
+                const rv = new THREE.Vector3(Math.random()-.5,Math.random()-.5,Math.random()-.5).normalize();
+                const bd = tan.clone().cross(rv).normalize().add(tan.multiplyScalar(0.4)).normalize();
+                addBranch(createWanderingPath(bs, bd, 8+Math.random()*14, 10, 0.35), 0.22+Math.random()*0.12, 1, mat, group);
+            }
+            for (let i = 0; i < 14; i++) {
+                const dir = new THREE.Vector3(Math.random()-.5,Math.random()-.5,Math.random()-.5).normalize();
+                addBranch(createWanderingPath(dir.clone().multiplyScalar(1.8), dir, 4+Math.random()*8, 6, 0.5), 0.1+Math.random()*0.12, 2, mat, group);
+            }
+            addBranch(createWanderingPath(new THREE.Vector3(2,0,0), new THREE.Vector3(1,0.1,0), 28, 18, 0.08), 0.3, 1, mat, group);
+            addBranch(createWanderingPath(new THREE.Vector3(-2,0,0), new THREE.Vector3(-1,0.1,0), 24, 16, 0.07), 0.28, 2, mat, group);
+        }
+
+        const neuronGenerators = [
+            generateMultipolar, generateBipolar, generateUnipolar, generatePseudounipolar,
+            generatePurkinje, generatePyramidal, generateInterneuron, generateMotor,
+            generateSensory, generateMyelinated,
+        ];
+
+        /* ─────────────────────────────────────────────
+           SYNAPSE SYSTEM
+        ───────────────────────────────────────────── */
+        function createSynapses(group, count) {
+            const positions = [], colors = [];
+            const excC = new THREE.Color(0x00ff88), inhC = new THREE.Color(0xff4444);
+            const minR = 5.8;
+            for (let i = 0; i < count; i++) {
+                const theta = Math.random()*Math.PI*2, phi = Math.acos(2*Math.random()-1);
+                const r = minR+Math.random()*12;
+                positions.push(r*Math.sin(phi)*Math.cos(theta), r*Math.sin(phi)*Math.sin(theta)*0.6, r*Math.cos(phi)*0.5);
+                const isE = Math.random()>0.3, c = isE ? excC : inhC;
+                colors.push(c.r, c.g, c.b);
+            }
+            const geo = new THREE.BufferGeometry();
+            geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3));
+            geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(colors), 3));
+            const mat = new THREE.PointsMaterial({ size: 0.14, vertexColors: true, transparent: true, opacity: 0.68, blending: THREE.AdditiveBlending, depthWrite: false });
+            const mesh = new THREE.Points(geo, mat);
+            group.add(mesh);
+            return mesh;
+        }
+
+        /* ─────────────────────────────────────────────
+           NEURON BUILDER
+        ───────────────────────────────────────────── */
+        function clearNeurons() {
+            neuronGroups.forEach(g => {
+                scene.remove(g);
+                g.traverse(c => { if (c.isMesh || c.isPoints) { c.geometry?.dispose(); } });
+            });
+            myelinMeshes.forEach(m => m.geometry?.dispose());
+            neuronGroups = []; synapseMeshes = []; myelinMeshes = [];
+            allMaterials.forEach(m => m.dispose());
+            allMaterials = [];
+        }
+
+        function buildNeuron(typeIdx) {
+            clearNeurons();
+            const mat = createNeuronMaterial(typeIdx);
+            const group = new THREE.Group();
+            neuronGenerators[typeIdx](mat, group);
+            scene.add(group);
+            neuronGroups.push(group);
+            synapseMeshes.push(createSynapses(group, 280 + Math.floor(Math.random() * 220)));
+            currentNeuronType = typeIdx;
+            updateNeuronListUI();
+            showNeuronInfo(typeIdx);
+            mat.uniforms.uPulseProgress.value = -10;
+            mat.uniforms.uActivation.value = 0;
+            // Close neuron drawer on mobile after selecting
+            if (innerWidth <= 900) {
+                $('neuron-drawer').classList.remove('open');
+                $('neuron-drawer-btn').textContent = '▶';
+            }
+        }
+
+        /* ─────────────────────────────────────────────
+           VIEW MODES
+        ───────────────────────────────────────────── */
+        function setViewMode(mode) {
+            viewMode = mode;
+            const modeMap = { all:0, axons:1, dendrites:2, soma:3, synapses:4, myelin:5, wireframe:6, xray:7, heatmap:8 };
+            const v = modeMap[mode] ?? 0;
+            synapseMeshes.forEach(m => { m.visible = !['axons','dendrites','soma','myelin'].includes(mode); });
+            myelinMeshes.forEach(m => { m.visible = mode === 'all' || mode === 'myelin'; });
+            allMaterials.forEach(mat => {
+                mat.uniforms.uViewMode.value = v;
+                mat.uniforms.uOpacity.value = mode === 'xray' ? 0.28 : mode === 'synapses' ? 0.04 : mode === 'myelin' ? 0.1 : 1.0;
+            });
+            document.querySelectorAll('.obs-btn').forEach(btn => btn.classList.toggle('active', btn.dataset.mode === mode));
+        }
+
+        /* ─────────────────────────────────────────────
+           SIGNAL MODES
+        ───────────────────────────────────────────── */
+        function setSignalMode(idx) {
+            signalMode = idx;
+            allMaterials.forEach(mat => { mat.uniforms.uColorMode.value = idx; });
+            document.querySelectorAll('.sig-btn').forEach(btn => btn.classList.toggle('active', parseInt(btn.dataset.sigmode)===idx));
+        }
+
+        function showNeuronInfo(typeIdx) {
+            const data = NEURON_DATA[typeIdx];
+            if (!data) return;
+            currentNeuronType = typeIdx;
+            showInfo(data, data.type);
+            updateNeuronListUI();
+        }
+
+        /* ─────────────────────────────────────────────
+           TOOLTIP
+        ───────────────────────────────────────────── */
+        let tooltipTimeout = null;
+        function showTooltip(name, type, func, speed, x, y) {
+            elTTName.textContent = name;
+            elTTType.textContent = type;
+            elTTFunc.textContent = func;
+            elTTSpeed.textContent = speed;
+            elTooltip.style.left = (x + 16) + 'px';
+            elTooltip.style.top = (y - 10) + 'px';
+            elTooltip.classList.add('vis');
+            clearTimeout(tooltipTimeout);
+        }
+        function hideTooltip() {
+            tooltipTimeout = setTimeout(() => elTooltip.classList.remove('vis'), 200);
+        }
+
+        /* ─────────────────────────────────────────────
+           RAYCASTING
+        ───────────────────────────────────────────── */
+        function getPointerNDC(clientX, clientY) {
+            if (!renderer?.domElement) return pointerNDC.set(0, 0);
+            const rect = renderer.domElement.getBoundingClientRect();
+            const w = rect.width || 1, h = rect.height || 1;
+            pointerNDC.set(((clientX - rect.left) / w) * 2 - 1, -((clientY - rect.top) / h) * 2 + 1);
+            return pointerNDC;
+        }
+
+        function raycastNerveSurface() {
+            if (!renderer?.domElement || !camera) return null;
+            getPointerNDC(mouseX, mouseY);
+            raycaster.setFromCamera(pointerNDC, camera);
+            const meshes = [];
+            neuronGroups.forEach(g => g.traverse(c => { if (c.isMesh && c.material?.uniforms) meshes.push(c); }));
+            const hits = meshes.length ? raycaster.intersectObjects(meshes, false) : [];
+            return hits.length ? hits[0].point : null;
+        }
+
+        /* ─────────────────────────────────────────────
+           SIGNAL STIMULATION
+        ───────────────────────────────────────────── */
+        function triggerStimulus() {
+            if (state !== STATE.IDLE || paused) return;
+            state = STATE.INCOMING;
+            pulseProg = INPUT_LENGTH; actProg = 0;
+            allMaterials.forEach(m => { m.uniforms.uActivation.value = 0; });
+            mvTarget = PEAK_MV;
+        }
+
+        /* ─────────────────────────────────────────────
+           UI BUILDERS
+        ───────────────────────────────────────────── */
+        function buildNeuronListUI() {
+            NEURON_DATA.forEach((data, i) => {
+                const div = document.createElement('div');
+                div.className = 'nopt' + (i===0 ? ' active' : '');
+                div.dataset.index = i;
+                const dot = document.createElement('span');
+                dot.className = 'ntype-color';
+                dot.style.background = '#' + new THREE.Color(data.color).getHexString();
+                div.appendChild(dot);
+                div.appendChild(document.createTextNode(data.name));
+                div.addEventListener('click', () => {
+                    currentNeuronIndex = i;
+                    buildNeuron(i);
+                    resetCamera();
+                    setViewMode('all');
+                });
+                elNeuronList.appendChild(div);
+            });
+        }
+
+        function updateNeuronListUI() {
+            elNeuronList.querySelectorAll('.nopt').forEach((item, i) => item.classList.toggle('active', i===currentNeuronType));
+        }
+
+        /* ─────────────────────────────────────────────
+           EVENT HANDLERS
+        ───────────────────────────────────────────── */
+        function bindCanvasEvents() {
+            if (!renderer?.domElement) return;
+            const canvas = renderer.domElement;
+            document.addEventListener('mousemove', onDocumentMouseMove);
+            canvas.addEventListener('click', onCanvasClick);
+        }
+
+        function onDocumentMouseMove(e) {
+            mouseX = e.clientX;
+            mouseY = e.clientY;
+        }
+
+        function onCanvasClick(e) {
+            if (!renderer?.domElement || e.target !== renderer.domElement) return;
+            triggerStimulus();
+        }
+
+        window.addEventListener('keydown', e => {
+            if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); triggerStimulus(); }
+            if (e.key === 'Escape') { resetCamera(); $('info-panel').classList.remove('vis'); }
+            if (e.key === '+' || e.key === '=') zoomCamera(0.82);
+            if (e.key === '-' || e.key === '_') zoomCamera(1.22);
+            const num = parseInt(e.key, 10);
+            if (!isNaN(num)) {
+                if (num >= 1 && num <= 9 && num <= NEURON_DATA.length) {
+                    buildNeuron(num - 1);
+                    resetCamera();
+                    setViewMode('all');
+                }
+                if (e.key === '0') { buildNeuron(9); resetCamera(); setViewMode('all'); }
+            }
+        });
+
+        $('cam-zoom-in').addEventListener('click', () => zoomCamera(0.82));
+        $('cam-zoom-out').addEventListener('click', () => zoomCamera(1.22));
+        $('cam-reset').addEventListener('click', () => resetCamera());
+        $('cam-orbit').addEventListener('click', () => toggleAutoRotate());
+
+        document.querySelectorAll('.obs-btn').forEach(btn => btn.addEventListener('click', () => setViewMode(btn.dataset.mode)));
+        document.querySelectorAll('.sig-btn').forEach(btn => btn.addEventListener('click', () => setSignalMode(parseInt(btn.dataset.sigmode, 10))));
+
+        $('tool-inject').addEventListener('click', () => triggerStimulus());
+        $('tool-auto').addEventListener('click', () => { autoSim = !autoSim; $('tool-auto').classList.toggle('active', autoSim); });
+        $('tool-pause').addEventListener('click', () => { paused = !paused; $('tool-pause').classList.toggle('active', paused); $('tool-pause').textContent = paused ? '▶' : '⏸'; });
+        $('tool-reset-cam').addEventListener('click', () => resetCamera());
+
+        elSpeedSlider.addEventListener('input', () => { speedMul=parseFloat(elSpeedSlider.value); elSpeedVal.textContent=speedMul.toFixed(1)+'×'; });
+
+        /* ─────────────────────────────────────────────
+           RESPONSIVE UI: INFO BUTTON, NEURON DRAWER
+        ───────────────────────────────────────────── */
+        // Info button toggle
+        const elInfoBtn = $('info-btn');
+        const elInfoPanel = $('info-panel');
+        let infoOpen = false;
+        if (elInfoBtn) {
+            elInfoBtn.addEventListener('click', () => {
+                infoOpen = !infoOpen;
+                elInfoPanel.classList.toggle('vis', infoOpen);
+                elInfoBtn.textContent = infoOpen ? 'Close' : 'Info';
+            });
+        }
+
+        // Neuron drawer toggle
+        const elDrawerBtn = $('neuron-drawer-btn');
+        const elDrawer = $('neuron-drawer');
+        let drawerOpen = false;
+        if (elDrawerBtn) {
+            elDrawerBtn.addEventListener('click', () => {
+                drawerOpen = !drawerOpen;
+                elDrawer.classList.toggle('open', drawerOpen);
+                elDrawerBtn.textContent = drawerOpen ? '◀' : '▶';
+            });
+        }
+
+        // Close info panel when clicking outside
+        document.addEventListener('click', (e) => {
+            if (infoOpen && elInfoPanel && !elInfoPanel.contains(e.target) && e.target !== elInfoBtn && !elInfoBtn.contains(e.target)) {
+                infoOpen = false;
+                elInfoPanel.classList.remove('vis');
+                elInfoBtn.textContent = 'Info';
+            }
+        });
+
+        // Close drawer when clicking outside
+        document.addEventListener('click', (e) => {
+            if (drawerOpen && elDrawer && !elDrawer.contains(e.target) && e.target !== elDrawerBtn && !elDrawerBtn.contains(e.target)) {
+                drawerOpen = false;
+                elDrawer.classList.remove('open');
+                elDrawerBtn.textContent = '▶';
+            }
+        });
+
+        /* ─────────────────────────────────────────────
+           ANIMATION LOOP
+        ───────────────────────────────────────────── */
+        function animate() {
+            requestAnimationFrame(animate);
+            if (!composer || !renderer || !controls || !clock) return;
+
+            const rawDelta = Math.min(clock.getDelta(), 1/30);
+            const delta = paused ? 0 : rawDelta * speedMul;
+            time += delta;
+            frameCount++;
+
+            controls.update();
+
+            const hitPt = raycastNerveSurface();
+            const eLerp = 1-Math.exp(-14*rawDelta);
+
+            allMaterials.forEach(mat => {
+                if (!mat.uniforms) return;
+                mat.uniforms.uTime.value += delta;
+                mat.uniforms.uCameraPos.value.copy(camera.position);
+                mat.uniforms.uColorMode.value = signalMode;
+                if (hitPt) {
+                    energyTarget.copy(hitPt);
+                    energySmooth.lerp(energyTarget, eLerp);
+                    mat.uniforms.uEnergyPos.value.copy(energySmooth);
+                    mat.uniforms.uEnergy.value = THREE.MathUtils.lerp(mat.uniforms.uEnergy.value, 0.85, eLerp);
+                    mat.uniforms.uEnergyRadius.value = 5.5;
+                    if (hitPt) {
+                        const nd = NEURON_DATA[currentNeuronType];
+                        if (nd) showTooltip(nd.name, nd.type, nd.function, nd.speed, mouseX, mouseY);
+                    }
+                } else {
+                    mat.uniforms.uEnergy.value = THREE.MathUtils.lerp(mat.uniforms.uEnergy.value, 0, eLerp*0.85);
+                    hideTooltip();
+                }
+            });
+
+            if (!paused) {
+                mvBase += (Math.random()-.5)*0.38;
+                mvBase = Math.max(-80, Math.min(-55, mvBase));
+                mvTarget += (mvBase-mvTarget)*0.05;
+            }
+
+            const mat = allMaterials[0];
+            if (mat && !paused) {
+                if (autoSim) { autoTimer += delta; if (autoTimer > 1.5 + Math.random() * 2.5) { autoTimer = 0; if (state === STATE.IDLE) triggerStimulus(); } }
+                if (state===STATE.INCOMING) {
+                    pulseProg -= delta*PULSE_SPEED;
+                    allMaterials.forEach(m => { if (m.uniforms?.uPulseProgress) m.uniforms.uPulseProgress.value = pulseProg; });
+                    mvTarget = PEAK_MV*(1-pulseProg/INPUT_LENGTH);
+                    if (pulseProg <= 2) { state=STATE.FIRING; allMaterials.forEach(m => { if (m.uniforms?.uPulseProgress) m.uniforms.uPulseProgress.value = -10; }); actProg=0; }
+                } else if (state===STATE.FIRING) {
+                    actProg += delta*ACTIVATION_SPEED;
+                    allMaterials.forEach(m => { if (m.uniforms?.uActivation) m.uniforms.uActivation.value = actProg; });
+                    if (actProg > ACTIVATION_DURATION) { state=STATE.REFRACTORY; refractoryTimer=0; allMaterials.forEach(m => { if (m.uniforms?.uActivation) m.uniforms.uActivation.value = 0; }); mvTarget=BASE_MV; }
+                } else if (state===STATE.REFRACTORY) {
+                    refractoryTimer += delta;
+                    if (refractoryTimer > 0.5) { state=STATE.IDLE; }
+                }
+            }
+
+            if (frameCount % UI_RATE === 0 && elMv && elProp) {
+                const mv = state === STATE.IDLE ? mvBase : mvTarget;
+                elMv.textContent = (mv >= 0 ? '+' : '') + mv.toFixed(1) + ' mV';
+                if (state === STATE.IDLE) elProp.textContent = 'Standby';
+                else if (state === STATE.INCOMING) elProp.textContent = 'Propagating';
+                else if (state === STATE.FIRING) elProp.textContent = 'Firing';
+                else elProp.textContent = 'Refractory';
+            }
+
+            renderFrame();
+        }
+
+        /* ─────────────────────────────────────────────
+           INITIALIZATION
+        ───────────────────────────────────────────── */
+        function init() {
+            if (!checkWebGL()) { loadingEl.classList.add('hidden'); return; }
+
+            const steps = ['Initializing renderer...', 'Building neuron structures...', 'Calibrating signals...', 'Ready.'];
+            let si = 0;
+            const stepInterval = setInterval(() => { if (si < steps.length) { ldStep.textContent = steps[si++]; } else clearInterval(stepInterval); }, 280);
+
+            setTimeout(() => {
+                try {
+                    initScene();
+                    bindCanvasEvents();
+                    buildNeuronListUI();
+                    buildNeuron(0);
+                    resetCamera();
+                    setViewMode('all');
+                    setSignalMode(0);
+                    showNeuronInfo(0);
+
+                    loadingEl.classList.add('hidden');
+                    animate();
+                } catch (err) {
+                    console.error(err);
+                    ldStep.textContent = 'Error: ' + (err.message || err);
+                    ldStep.style.color = '#ff4444';
+                    ldStep.style.fontSize = '0.75rem';
+                    ldStep.style.letterSpacing = 'normal';
+                    ldStep.style.textTransform = 'none';
+                }
+            }, 1600);
+        }
+
+        init();
+    </script>
+</body>
+</html>
